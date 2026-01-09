@@ -3,6 +3,7 @@ package infrastructure
 import (
 	"database/sql"
 	"fmt"
+	"net"
 	"os"
 
 	_ "github.com/lib/pq"
@@ -47,6 +48,25 @@ func getConnectionString() string {
 	password := getEnv("DB_PASSWORD", "")
 	dbname := getEnv("DB_NAME", "postgres")
 	sslmode := getEnv("DB_SSLMODE", "disable")
+
+	// Try to resolve an IPv4 address for the host and include it as hostaddr.
+	// This helps avoid "network is unreachable" when the hostname resolves to an IPv6 address
+	// but the local machine has no IPv6 connectivity. Keeping `host` preserves SSL hostname verification.
+	hostaddr := ""
+	ips, err := net.LookupIP(host)
+	if err == nil {
+		for _, ip := range ips {
+			if ip.To4() != nil {
+				hostaddr = ip.String()
+				break
+			}
+		}
+	}
+
+	if hostaddr != "" {
+		return fmt.Sprintf("host=%s hostaddr=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+			host, hostaddr, port, user, password, dbname, sslmode)
+	}
 
 	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
 		host, port, user, password, dbname, sslmode)

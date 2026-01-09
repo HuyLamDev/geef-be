@@ -1,0 +1,234 @@
+package controllers
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"geef-be/internal/infrastructure"
+	userinfra "geef-be/internal/user/infrastructure"
+)
+
+type OAuthController struct{
+    authCfg *infrastructure.AuthConfig
+}
+
+func NewOAuthController(authCfg *infrastructure.AuthConfig) *OAuthController {
+    return &OAuthController{authCfg: authCfg}
+}
+
+// Register OAuth routes
+func (c *OAuthController) RegisterRoutes(mux *http.ServeMux) {
+    mux.HandleFunc("/api/auth/google", c.HandleGoogleStart)
+    mux.HandleFunc("/api/auth/google/callback", c.HandleGoogleCallback)
+    mux.HandleFunc("/api/auth/me", c.HandleMe)
+    mux.HandleFunc("/api/auth/logout", c.HandleLogout)
+    mux.HandleFunc("/api/auth/google/url", c.HandleGoogleURL)
+}
+
+// Redirects user to Google's OAuth 2.0 consent screen
+func (c *OAuthController) HandleGoogleStart(w http.ResponseWriter, r *http.Request) {
+    params := url.Values{}
+    params.Set("client_id", c.authCfg.GoogleClientID)
+    params.Set("redirect_uri", c.authCfg.GoogleRedirectURI)
+    params.Set("response_type", "code")
+    params.Set("scope", "openid email profile")
+    params.Set("access_type", "offline")
+    params.Set("prompt", "consent")
+
+    authURL := "https://accounts.google.com/o/oauth2/v2/auth?" + params.Encode()
+    http.Redirect(w, r, authURL, http.StatusFound)
+}
+
+// HandleGoogleURL returns the Google OAuth URL as JSON so the client can open it
+func (c *OAuthController) HandleGoogleURL(w http.ResponseWriter, r *http.Request) {
+    params := url.Values{}
+    params.Set("client_id", c.authCfg.GoogleClientID)
+    params.Set("redirect_uri", c.authCfg.GoogleRedirectURI)
+    params.Set("response_type", "code")
+    params.Set("scope", "openid email profile")
+    params.Set("access_type", "offline")
+    params.Set("prompt", "consent")
+
+    authURL := "https://accounts.google.com/o/oauth2/v2/auth?" + params.Encode()
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]string{"url": authURL})
+}
+
+// Callback endpoint where Google will redirect after consent (placeholder)
+func (c *OAuthController) HandleGoogleCallback(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    q := r.URL.Query()
+    code := q.Get("code")
+    if code == "" {
+        c.redirectWithError(w, r, "Code missing")
+        return
+    }
+
+    // Exchange code for tokens
+    tokenResp, err := userinfra.ExchangeCode(c.authCfg, ctx, code)
+    if err != nil {
+        c.redirectWithError(w, r, "Token exchange failed: "+err.Error())
+        return
+    }
+
+    var claims map[string]interface{}
+
+    // If Google returned an ID token, verify it. Otherwise, fall back to the UserInfo endpoint
+    if tokenResp.IdToken != "" {
+        claims, err = userinfra.VerifyIDToken(c.authCfg, ctx, tokenResp.IdToken)
+        if err != nil {
+            c.redirectWithError(w, r, "ID token verification failed: "+err.Error())
+            return
+        }
+    } else {
+        // Call UserInfo endpoint with access token as fallback
+        req, _ := http.NewRequestWithContext(ctx, "GET", "https://www.googleapis.com/oauth2/v3/userinfo", nil)
+        req.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
+        resp, err := http.DefaultClient.Do(req)
+        if err != nil {
+            c.redirectWithError(w, r, "Failed to fetch userinfo: "+err.Error())
+            return
+        }
+        defer resp.Body.Close()
+        if resp.StatusCode != http.StatusOK {
+            c.redirectWithError(w, r, "Failed to fetch userinfo: status "+resp.Status)
+            return
+        }
+        if err := json.NewDecoder(resp.Body).Decode(&claims); err != nil {
+            http.Error(w, "Failed to parse userinfo: "+err.Error(), http.StatusInternalServerError)
+            return
+        }
+    }
+
+    // Map claims to user model (simple map for now)
+    user := map[string]interface{}{
+        "sub":   claims["sub"],
+        "email": claims["email"],
+        "name":  claims["name"],
+    }
+
+    // Persist or update user via repository (using placeholder repo)
+    repo := userinfra.NewUserRepository(nil, nil)
+    if err := repo.SaveUser(user); err != nil {
+        c.redirectWithError(w, r, "Saving user failed: "+err.Error())
+        return
+    }
+
+    // Create a simple HMAC-signed session token (not a full JWT)
+    jwtSecret := []byte(c.authCfg.JWTSecret)
+    sessClaims := map[string]interface{}{
+        "sub":   claims["sub"],
+        "email": claims["email"],
+        "exp":   time.Now().Add(24 * time.Hour).Unix(),
+        "iat":   time.Now().Unix(),
+    }
+    payloadBytes, _ := json.Marshal(sessClaims)
+    payload := base64.RawURLEncoding.EncodeToString(payloadBytes)
+    mac := hmac.New(sha256.New, jwtSecret)
+    mac.Write([]byte(payload))
+    sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+    signed := payload + "." + sig
+
+    // Set cookie and redirect back to frontend
+    cookie := &http.Cookie{
+        Name:     "gfe_session",
+        Value:    signed,
+        Path:     "/",
+        HttpOnly: true,
+        Secure:   false,
+        Expires:  time.Now().Add(24 * time.Hour),
+    }
+    http.SetCookie(w, cookie)
+
+    // Redirect to frontend callback to notify the client popup
+    redirect := c.authCfg.FrontendOrigin + "/auth/callback?success=1"
+    http.Redirect(w, r, redirect, http.StatusSeeOther)
+}
+
+func (c *OAuthController) redirectWithError(w http.ResponseWriter, r *http.Request, msg string) {
+    redirect := c.authCfg.FrontendOrigin + "/auth/callback?error=" + url.QueryEscape(msg)
+    http.Redirect(w, r, redirect, http.StatusSeeOther)
+}
+
+// HandleMe validates session cookie and returns basic user info
+func (c *OAuthController) HandleMe(w http.ResponseWriter, r *http.Request) {
+    cookie, err := r.Cookie("gfe_session")
+    if err != nil {
+        http.Error(w, "Not authenticated", http.StatusUnauthorized)
+        return
+    }
+
+    parts := strings.Split(cookie.Value, ".")
+    if len(parts) != 2 {
+        http.Error(w, "Invalid session", http.StatusUnauthorized)
+        return
+    }
+
+    payloadB, err := base64.RawURLEncoding.DecodeString(parts[0])
+    if err != nil {
+        http.Error(w, "Invalid session payload", http.StatusUnauthorized)
+        return
+    }
+
+    sig, err := base64.RawURLEncoding.DecodeString(parts[1])
+    if err != nil {
+        http.Error(w, "Invalid session signature", http.StatusUnauthorized)
+        return
+    }
+
+    mac := hmac.New(sha256.New, []byte(c.authCfg.JWTSecret))
+    mac.Write([]byte(parts[0]))
+    expected := mac.Sum(nil)
+    if !hmac.Equal(sig, expected) {
+        http.Error(w, "Invalid session signature", http.StatusUnauthorized)
+        return
+    }
+
+    var sessClaims map[string]interface{}
+    if err := json.Unmarshal(payloadB, &sessClaims); err != nil {
+        http.Error(w, "Unable to parse session", http.StatusUnauthorized)
+        return
+    }
+
+    // Check expiration
+    if expVal, ok := sessClaims["exp"].(float64); ok {
+        if time.Now().Unix() > int64(expVal) {
+            http.Error(w, "Session expired", http.StatusUnauthorized)
+            return
+        }
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]interface{}{
+        "user": sessClaims,
+    })
+}
+
+// HandleLogout clears the session cookie
+func (c *OAuthController) HandleLogout(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        w.Header().Set("Allow", http.MethodPost)
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+
+    cookie := &http.Cookie{
+        Name:     "gfe_session",
+        Value:    "",
+        Path:     "/",
+        HttpOnly: true,
+        Secure:   false,
+        Expires:  time.Unix(0, 0),
+        MaxAge:   -1,
+    }
+    http.SetCookie(w, cookie)
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}

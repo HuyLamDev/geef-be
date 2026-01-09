@@ -29,6 +29,7 @@ func main() {
 
 	// Initialize infrastructure config
 	config := infrastructure.NewConfig()
+	authCfg := infrastructure.NewAuthConfig()
 
 	// Wire and initialize user module
 	userHandlers := user.NewUserModule(config)
@@ -41,21 +42,50 @@ func main() {
 
 	// Initialize controllers for each module
 	userController := userControllers.NewUserController(userHandlers)
+	oauthController := userControllers.NewOAuthController(authCfg)
 	projectController := controllers.NewProjectController(projectHandlers)
 
 	// Register routes for each module
 	userController.RegisterRoutes(mux)
+	oauthController.RegisterRoutes(mux)
 	projectController.RegisterRoutes(mux)
 
 	// Register common routes
 	mux.HandleFunc("/health", healthCheck)
 	mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
 
+	// Wrap mux with CORS handler
+	frontendOrigin := authCfg.FrontendOrigin
+	handler := corsMiddleware(mux, frontendOrigin)
+
 	// Start the server
 	config.Logger.Info("Starting Geef Backend API on port 8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	if err := http.ListenAndServe(":8080", handler); err != nil {
 		config.Logger.WithError(err).Fatal("Server failed to start")
 	}
+}
+
+// Simple CORS middleware -- in dev it allows the configured FRONTEND_ORIGIN or '*'
+func corsMiddleware(next http.Handler, allowedOrigin string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if allowedOrigin == "*" || allowedOrigin == "" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		} else if origin == allowedOrigin {
+			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+			w.Header().Set("Vary", "Origin")
+		}
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, traceparent, tracestate, baggage")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func healthCheck(w http.ResponseWriter, r *http.Request) {
