@@ -20,7 +20,7 @@ type Config struct {
 func NewConfig() *Config {
 	// Initialize logger
 	logger := logrus.New()
-	logger.SetFormatter(&logrus.JSONFormatter{})
+	logger.SetFormatter(&logrus.TextFormatter{})
 	logger.SetLevel(logrus.InfoLevel)
 
 	// Initialize database

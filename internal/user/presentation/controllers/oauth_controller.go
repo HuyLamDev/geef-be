@@ -119,17 +119,36 @@ func (c *OAuthController) HandleGoogleCallback(w http.ResponseWriter, r *http.Re
 
     // Map claims to user model (simple map for now)
     user := map[string]interface{}{
-        "sub":   claims["sub"],
-        "email": claims["email"],
-        "name":  claims["name"],
+        "sub":        claims["sub"],
+        "email":      claims["email"],
+        "name":       claims["name"], // display name
+        "provider":   "google",
+        "avatar_url": claims["picture"],
+        "full_name":  claims["name"], // Google provides display name as 'name'
     }
 
-    // Persist or update user via repository (using placeholder repo)
+    // Persist or update user via repository
     repo := userinfra.NewUserRepository(c.db, c.logger)
-    if err := repo.SaveUser(user); err != nil {
-        c.logger.WithError(err).WithField("user_id", user["sub"]).Error("OAuth callback: failed to save user")
-        http.Error(w, "Saving user failed: "+err.Error(), http.StatusInternalServerError)
+    
+    // Check if user already exists
+    existingUser, err := repo.FindUserByID(user["sub"].(string))
+    if err != nil {
+        c.logger.WithError(err).WithField("user_id", user["sub"]).Error("OAuth callback: failed to check existing user")
+        http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
         return
+    }
+    
+    if existingUser == nil {
+        // First time login - save new user
+        c.logger.WithField("user_id", user["sub"]).Info("OAuth callback: first time login, saving new user")
+        if err := repo.SaveUser(user); err != nil {
+            c.logger.WithError(err).WithField("user_id", user["sub"]).Error("OAuth callback: failed to save new user")
+            http.Error(w, "Saving user failed: "+err.Error(), http.StatusInternalServerError)
+            return
+        }
+    } else {
+        // Returning user - just log the login
+        c.logger.WithField("user_id", user["sub"]).Info("OAuth callback: returning user login")
     }
 
     // Create a simple HMAC-signed session token (not a full JWT)
