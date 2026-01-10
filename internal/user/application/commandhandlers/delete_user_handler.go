@@ -6,16 +6,19 @@ import (
 
 	"geef-be/internal/user/domain/commands"
 	userinfrastructure "geef-be/internal/user/infrastructure"
+
+	"github.com/sirupsen/logrus"
 )
 
 // DeleteUserCommandHandler handles DeleteUserCommand
 type DeleteUserCommandHandler struct {
-	repo userinfrastructure.UserRepository
+	repo   userinfrastructure.UserRepository
+	logger *logrus.Logger
 }
 
 // NewDeleteUserCommandHandler creates a new DeleteUserCommandHandler
-func NewDeleteUserCommandHandler(repo userinfrastructure.UserRepository) *DeleteUserCommandHandler {
-	return &DeleteUserCommandHandler{repo: repo}
+func NewDeleteUserCommandHandler(repo userinfrastructure.UserRepository, logger *logrus.Logger) *DeleteUserCommandHandler {
+	return &DeleteUserCommandHandler{repo: repo, logger: logger}
 }
 
 // Handle processes the DeleteUserCommand

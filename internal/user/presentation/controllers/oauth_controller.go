@@ -12,14 +12,17 @@ import (
 
 	"geef-be/internal/infrastructure"
 	userinfra "geef-be/internal/user/infrastructure"
+
+	"github.com/sirupsen/logrus"
 )
 
 type OAuthController struct{
     authCfg *infrastructure.AuthConfig
+    logger  *logrus.Logger
 }
 
-func NewOAuthController(authCfg *infrastructure.AuthConfig) *OAuthController {
-    return &OAuthController{authCfg: authCfg}
+func NewOAuthController(authCfg *infrastructure.AuthConfig, logger *logrus.Logger) *OAuthController {
+    return &OAuthController{authCfg: authCfg, logger: logger}
 }
 
 // Register OAuth routes
@@ -66,14 +69,16 @@ func (c *OAuthController) HandleGoogleCallback(w http.ResponseWriter, r *http.Re
     q := r.URL.Query()
     code := q.Get("code")
     if code == "" {
-        c.redirectWithError(w, r, "Code missing")
+        c.logger.Warn("OAuth callback: missing authorization code")
+        http.Error(w, "Code missing", http.StatusBadRequest)
         return
     }
 
     // Exchange code for tokens
     tokenResp, err := userinfra.ExchangeCode(c.authCfg, ctx, code)
     if err != nil {
-        c.redirectWithError(w, r, "Token exchange failed: "+err.Error())
+        c.logger.WithError(err).Error("OAuth callback: token exchange failed")
+        http.Error(w, "Token exchange failed: "+err.Error(), http.StatusInternalServerError)
         return
     }
 
@@ -83,7 +88,8 @@ func (c *OAuthController) HandleGoogleCallback(w http.ResponseWriter, r *http.Re
     if tokenResp.IdToken != "" {
         claims, err = userinfra.VerifyIDToken(c.authCfg, ctx, tokenResp.IdToken)
         if err != nil {
-            c.redirectWithError(w, r, "ID token verification failed: "+err.Error())
+            c.logger.WithError(err).Error("OAuth callback: ID token verification failed")
+            http.Error(w, "ID token verification failed: "+err.Error(), http.StatusUnauthorized)
             return
         }
     } else {
@@ -92,15 +98,18 @@ func (c *OAuthController) HandleGoogleCallback(w http.ResponseWriter, r *http.Re
         req.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
         resp, err := http.DefaultClient.Do(req)
         if err != nil {
-            c.redirectWithError(w, r, "Failed to fetch userinfo: "+err.Error())
+            c.logger.WithError(err).Error("OAuth callback: failed to fetch userinfo")
+            http.Error(w, "Failed to fetch userinfo: "+err.Error(), http.StatusInternalServerError)
             return
         }
         defer resp.Body.Close()
         if resp.StatusCode != http.StatusOK {
-            c.redirectWithError(w, r, "Failed to fetch userinfo: status "+resp.Status)
+            c.logger.WithField("status", resp.Status).Error("OAuth callback: userinfo endpoint returned non-OK status")
+            http.Error(w, "Failed to fetch userinfo: status "+resp.Status, http.StatusInternalServerError)
             return
         }
         if err := json.NewDecoder(resp.Body).Decode(&claims); err != nil {
+            c.logger.WithError(err).Error("OAuth callback: failed to parse userinfo response")
             http.Error(w, "Failed to parse userinfo: "+err.Error(), http.StatusInternalServerError)
             return
         }
@@ -116,7 +125,8 @@ func (c *OAuthController) HandleGoogleCallback(w http.ResponseWriter, r *http.Re
     // Persist or update user via repository (using placeholder repo)
     repo := userinfra.NewUserRepository(nil, nil)
     if err := repo.SaveUser(user); err != nil {
-        c.redirectWithError(w, r, "Saving user failed: "+err.Error())
+        c.logger.WithError(err).WithField("user_id", user["sub"]).Error("OAuth callback: failed to save user")
+        http.Error(w, "Saving user failed: "+err.Error(), http.StatusInternalServerError)
         return
     }
 
@@ -146,13 +156,8 @@ func (c *OAuthController) HandleGoogleCallback(w http.ResponseWriter, r *http.Re
     }
     http.SetCookie(w, cookie)
 
-    // Redirect to frontend callback to notify the client popup
-    redirect := c.authCfg.FrontendOrigin + "/auth/callback?success=1"
-    http.Redirect(w, r, redirect, http.StatusSeeOther)
-}
-
-func (c *OAuthController) redirectWithError(w http.ResponseWriter, r *http.Request, msg string) {
-    redirect := c.authCfg.FrontendOrigin + "/auth/callback?error=" + url.QueryEscape(msg)
+    // Redirect to frontend origin
+    redirect := c.authCfg.FrontendOrigin + "/"
     http.Redirect(w, r, redirect, http.StatusSeeOther)
 }
 
@@ -160,24 +165,28 @@ func (c *OAuthController) redirectWithError(w http.ResponseWriter, r *http.Reque
 func (c *OAuthController) HandleMe(w http.ResponseWriter, r *http.Request) {
     cookie, err := r.Cookie("gfe_session")
     if err != nil {
+        c.logger.Warn("HandleMe: no session cookie found")
         http.Error(w, "Not authenticated", http.StatusUnauthorized)
         return
     }
 
     parts := strings.Split(cookie.Value, ".")
     if len(parts) != 2 {
+        c.logger.Warn("HandleMe: invalid session format")
         http.Error(w, "Invalid session", http.StatusUnauthorized)
         return
     }
 
     payloadB, err := base64.RawURLEncoding.DecodeString(parts[0])
     if err != nil {
+        c.logger.WithError(err).Warn("HandleMe: invalid session payload")
         http.Error(w, "Invalid session payload", http.StatusUnauthorized)
         return
     }
 
     sig, err := base64.RawURLEncoding.DecodeString(parts[1])
     if err != nil {
+        c.logger.WithError(err).Warn("HandleMe: invalid session signature")
         http.Error(w, "Invalid session signature", http.StatusUnauthorized)
         return
     }
@@ -186,12 +195,14 @@ func (c *OAuthController) HandleMe(w http.ResponseWriter, r *http.Request) {
     mac.Write([]byte(parts[0]))
     expected := mac.Sum(nil)
     if !hmac.Equal(sig, expected) {
+        c.logger.Warn("HandleMe: session signature verification failed")
         http.Error(w, "Invalid session signature", http.StatusUnauthorized)
         return
     }
 
     var sessClaims map[string]interface{}
     if err := json.Unmarshal(payloadB, &sessClaims); err != nil {
+        c.logger.WithError(err).Warn("HandleMe: unable to parse session claims")
         http.Error(w, "Unable to parse session", http.StatusUnauthorized)
         return
     }
@@ -199,6 +210,7 @@ func (c *OAuthController) HandleMe(w http.ResponseWriter, r *http.Request) {
     // Check expiration
     if expVal, ok := sessClaims["exp"].(float64); ok {
         if time.Now().Unix() > int64(expVal) {
+            c.logger.Warn("HandleMe: session expired")
             http.Error(w, "Session expired", http.StatusUnauthorized)
             return
         }
@@ -213,6 +225,7 @@ func (c *OAuthController) HandleMe(w http.ResponseWriter, r *http.Request) {
 // HandleLogout clears the session cookie
 func (c *OAuthController) HandleLogout(w http.ResponseWriter, r *http.Request) {
     if r.Method != http.MethodPost {
+        c.logger.WithField("method", r.Method).Warn("HandleLogout: invalid HTTP method")
         w.Header().Set("Allow", http.MethodPost)
         http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
         return

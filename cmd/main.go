@@ -42,8 +42,8 @@ func main() {
 
 	// Initialize controllers for each module
 	userController := userControllers.NewUserController(userHandlers)
-	oauthController := userControllers.NewOAuthController(authCfg)
-	projectController := controllers.NewProjectController(projectHandlers)
+	oauthController := userControllers.NewOAuthController(authCfg, config.Logger)
+	projectController := controllers.NewProjectController(projectHandlers, config.Logger)
 
 	// Register routes for each module
 	userController.RegisterRoutes(mux)

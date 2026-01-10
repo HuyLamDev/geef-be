@@ -31,9 +31,9 @@ func NewProjectModule(config *infrastructure.Config) *ProjectHandlers {
 	projectRepo := projectinfrastructure.NewProjectRepository(config.DB, config.Logger)
 
 	// Initialize command handlers
-	createHandler := commandhandlers.NewCreateProjectCommandHandler(projectRepo)
-	updateHandler := commandhandlers.NewUpdateProjectCommandHandler(projectRepo)
-	deleteHandler := commandhandlers.NewDeleteProjectCommandHandler(projectRepo)
+	createHandler := commandhandlers.NewCreateProjectCommandHandler(projectRepo, config.Logger)
+	updateHandler := commandhandlers.NewUpdateProjectCommandHandler(projectRepo, config.Logger)
+	deleteHandler := commandhandlers.NewDeleteProjectCommandHandler(projectRepo, config.Logger)
 
 	config.Logger.Info("Project module initialized")
 

@@ -31,9 +31,9 @@ func NewUserModule(config *infrastructure.Config) *UserHandlers {
 	userRepo := userinfrastructure.NewUserRepository(config.DB, config.Logger)
 
 	// Initialize command handlers
-	createHandler := commandhandlers.NewCreateUserCommandHandler(userRepo)
-	updateHandler := commandhandlers.NewUpdateUserCommandHandler(userRepo)
-	deleteHandler := commandhandlers.NewDeleteUserCommandHandler(userRepo)
+	createHandler := commandhandlers.NewCreateUserCommandHandler(userRepo, config.Logger)
+	updateHandler := commandhandlers.NewUpdateUserCommandHandler(userRepo, config.Logger)
+	deleteHandler := commandhandlers.NewDeleteUserCommandHandler(userRepo, config.Logger)
 
 	config.Logger.Info("User module initialized")
 

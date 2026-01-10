@@ -7,16 +7,19 @@ import (
 	"geef-be/internal/user/domain/commands"
 	"geef-be/internal/user/domain/entities"
 	userinfrastructure "geef-be/internal/user/infrastructure"
+
+	"github.com/sirupsen/logrus"
 )
 
 // UpdateUserCommandHandler handles UpdateUserCommand
 type UpdateUserCommandHandler struct {
-	repo userinfrastructure.UserRepository
+	repo   userinfrastructure.UserRepository
+	logger *logrus.Logger
 }
 
 // NewUpdateUserCommandHandler creates a new UpdateUserCommandHandler
-func NewUpdateUserCommandHandler(repo userinfrastructure.UserRepository) *UpdateUserCommandHandler {
-	return &UpdateUserCommandHandler{repo: repo}
+func NewUpdateUserCommandHandler(repo userinfrastructure.UserRepository, logger *logrus.Logger) *UpdateUserCommandHandler {
+	return &UpdateUserCommandHandler{repo: repo, logger: logger}
 }
 
 // Handle processes the UpdateUserCommand
