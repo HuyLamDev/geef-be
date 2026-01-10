@@ -3,6 +3,7 @@ package controllers
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -17,12 +18,13 @@ import (
 )
 
 type OAuthController struct{
-    authCfg *infrastructure.AuthConfig
+    db      *sql.DB
     logger  *logrus.Logger
+    authCfg *infrastructure.AuthConfig
 }
 
-func NewOAuthController(authCfg *infrastructure.AuthConfig, logger *logrus.Logger) *OAuthController {
-    return &OAuthController{authCfg: authCfg, logger: logger}
+func NewOAuthController(db *sql.DB, logger *logrus.Logger, authCfg *infrastructure.AuthConfig) *OAuthController {
+    return &OAuthController{db: db, logger: logger, authCfg: authCfg}
 }
 
 // Register OAuth routes
@@ -123,7 +125,7 @@ func (c *OAuthController) HandleGoogleCallback(w http.ResponseWriter, r *http.Re
     }
 
     // Persist or update user via repository (using placeholder repo)
-    repo := userinfra.NewUserRepository(nil, nil)
+    repo := userinfra.NewUserRepository(c.db, c.logger)
     if err := repo.SaveUser(user); err != nil {
         c.logger.WithError(err).WithField("user_id", user["sub"]).Error("OAuth callback: failed to save user")
         http.Error(w, "Saving user failed: "+err.Error(), http.StatusInternalServerError)

@@ -16,8 +16,10 @@ import (
 	userControllers "geef-be/internal/user/presentation/controllers"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/sirupsen/logrus"
 	httpSwagger "github.com/swaggo/http-swagger"
 )
 
@@ -42,7 +44,7 @@ func main() {
 
 	// Initialize controllers for each module
 	userController := userControllers.NewUserController(userHandlers)
-	oauthController := userControllers.NewOAuthController(authCfg, config.Logger)
+	oauthController := userControllers.NewOAuthController(config.DB, config.Logger, authCfg)
 	projectController := controllers.NewProjectController(projectHandlers, config.Logger)
 
 	// Register routes for each module
@@ -54,9 +56,10 @@ func main() {
 	mux.HandleFunc("/health", healthCheck)
 	mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
 
-	// Wrap mux with CORS handler
+	// Wrap mux with logging and CORS handlers
 	frontendOrigin := authCfg.FrontendOrigin
-	handler := corsMiddleware(mux, frontendOrigin)
+	handler := loggingMiddleware(mux, config.Logger)
+	handler = corsMiddleware(handler, frontendOrigin)
 
 	// Start the server
 	config.Logger.Info("Starting Geef Backend API on port 8080")
@@ -86,6 +89,45 @@ func corsMiddleware(next http.Handler, allowedOrigin string) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// Logging middleware logs HTTP request details: URL, method, duration
+func loggingMiddleware(next http.Handler, logger *logrus.Logger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		// Create a response writer wrapper to capture status code
+		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+		// Call the next handler
+		next.ServeHTTP(wrapped, r)
+
+		// Calculate duration
+		duration := time.Since(start)
+
+		// Log the request details
+		logger.WithFields(logrus.Fields{
+			"method":     r.Method,
+			"url":        r.URL.Path,
+			"query":      r.URL.RawQuery,
+			"user_agent": r.Header.Get("User-Agent"),
+			"remote_ip":  r.RemoteAddr,
+			"status":     wrapped.statusCode,
+			"duration":   duration.String(),
+			"duration_ms": duration.Milliseconds(),
+		}).Info("HTTP Request")
+	})
+}
+
+// responseWriter wraps http.ResponseWriter to capture the status code
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
 }
 
 func healthCheck(w http.ResponseWriter, r *http.Request) {
