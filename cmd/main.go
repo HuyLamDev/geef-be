@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -73,18 +74,18 @@ func main() {
 // Simple CORS middleware -- allows configured origins
 func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
+		origin := strings.TrimSuffix(r.Header.Get("Origin"), "/")
 		fmt.Printf("CORS: Request from origin: %s\n", origin)
 		fmt.Printf("CORS: Allowed origins: %v\n", allowedOrigins)
 
 		// Check if origin is allowed and set headers
 		originAllowed := false
 		for _, allowedOrigin := range allowedOrigins {
+			fmt.Printf("CORS: Comparing '%s' == '%s'\n", origin, allowedOrigin)
 			if allowedOrigin == "*" || allowedOrigin == "" || origin == allowedOrigin {
 				originAllowed = true
 				if allowedOrigin != "*" && allowedOrigin != "" {
 					w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-					w.Header().Set("Vary", "Origin")
 					fmt.Printf("CORS: Allowed origin %s, setting header\n", allowedOrigin)
 				} else {
 					w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -94,19 +95,23 @@ func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 			}
 		}
 
+		if originAllowed {
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Vary", "Origin")
+		}
+
 		if !originAllowed {
 			fmt.Printf("CORS: Origin %s not allowed\n", origin)
 		}
 
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, traceparent, tracestate, baggage")
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
-
+		// Handle preflight OPTIONS request
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 
+		// Call the next handler
 		next.ServeHTTP(w, r)
 	})
 }

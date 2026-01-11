@@ -34,7 +34,7 @@ func parseFrontendOrigins() []string {
     if originsStr != "" {
         origins := strings.Split(originsStr, ",")
         for i, origin := range origins {
-            origins[i] = strings.TrimSpace(origin)
+            origins[i] = strings.TrimSuffix(strings.TrimSpace(origin), "/")
         }
         fmt.Printf("AuthConfig: Parsed FRONTEND_ORIGINS: %v\n", origins)
         return origins
@@ -42,7 +42,7 @@ func parseFrontendOrigins() []string {
 
     // Fallback to single origin for backward compatibility
     origin := getEnv("FRONTEND_ORIGIN", "http://localhost:5173")
-    origins := []string{origin}
+    origins := []string{strings.TrimSuffix(strings.TrimSpace(origin), "/")}
     fmt.Printf("AuthConfig: Using fallback FRONTEND_ORIGIN: %v\n", origins)
     return origins
 }
