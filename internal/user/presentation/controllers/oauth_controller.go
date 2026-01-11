@@ -27,6 +27,29 @@ func NewOAuthController(db *sql.DB, logger *logrus.Logger, authCfg *infrastructu
     return &OAuthController{db: db, logger: logger, authCfg: authCfg}
 }
 
+// matchesWildcard checks if origin matches a wildcard pattern like https://*.vercel.app
+func matchesWildcard(origin, pattern string) bool {
+	if !strings.Contains(pattern, "*") {
+		return false
+	}
+
+	// Handle https://*.domain.com pattern
+	if strings.HasPrefix(pattern, "https://*.") {
+		suffix := strings.TrimPrefix(pattern, "https://*.") // get domain.com
+		expectedPrefix := "https://"
+		expectedSuffix := "." + suffix
+		return strings.HasPrefix(origin, expectedPrefix) && strings.HasSuffix(origin, expectedSuffix) && len(strings.TrimSuffix(strings.TrimPrefix(origin, expectedPrefix), expectedSuffix)) > 0
+	}
+
+	// Handle *.domain.com pattern
+	if strings.HasPrefix(pattern, "*.") {
+		suffix := pattern[1:] // remove the *
+		return strings.HasSuffix(origin, suffix) && !strings.Contains(strings.TrimSuffix(origin, suffix), ".")
+	}
+
+	return false
+}
+
 // Register OAuth routes
 func (c *OAuthController) RegisterRoutes(mux *http.ServeMux) {
     mux.HandleFunc("/api/auth/google", c.HandleGoogleStart)
@@ -52,6 +75,12 @@ func (c *OAuthController) HandleGoogleStart(w http.ResponseWriter, r *http.Reque
 
 // HandleGoogleURL returns the Google OAuth URL as JSON so the client can open it
 func (c *OAuthController) HandleGoogleURL(w http.ResponseWriter, r *http.Request) {
+    origin := strings.TrimSuffix(r.Header.Get("Origin"), "/")
+    if origin == "" {
+        // Fallback for requests without Origin header
+        origin = c.authCfg.FrontendOrigins[0]
+    }
+
     params := url.Values{}
     params.Set("client_id", c.authCfg.GoogleClientID)
     params.Set("redirect_uri", c.authCfg.GoogleRedirectURI)
@@ -59,6 +88,7 @@ func (c *OAuthController) HandleGoogleURL(w http.ResponseWriter, r *http.Request
     params.Set("scope", "openid email profile")
     params.Set("access_type", "offline")
     params.Set("prompt", "consent")
+    params.Set("state", origin) // Include origin in state for callback redirect
 
     authURL := "https://accounts.google.com/o/oauth2/v2/auth?" + params.Encode()
     w.Header().Set("Content-Type", "application/json")
@@ -70,10 +100,22 @@ func (c *OAuthController) HandleGoogleCallback(w http.ResponseWriter, r *http.Re
     ctx := r.Context()
     q := r.URL.Query()
     code := q.Get("code")
+    state := q.Get("state") // Get the origin from state
     if code == "" {
         c.logger.Warn("OAuth callback: missing authorization code")
         c.redirectWithError(w, r, "missing_code")
         return
+    }
+
+    // Validate state (origin) is allowed
+    redirectOrigin := c.authCfg.FrontendOrigins[0] // default fallback
+    if state != "" {
+        for _, allowed := range c.authCfg.FrontendOrigins {
+            if state == allowed || matchesWildcard(state, allowed) {
+                redirectOrigin = state
+                break
+            }
+        }
     }
 
     // Exchange code for tokens
@@ -178,7 +220,7 @@ func (c *OAuthController) HandleGoogleCallback(w http.ResponseWriter, r *http.Re
     http.SetCookie(w, cookie)
 
     // Redirect to frontend callback page (will handle popup closing)
-    redirect := c.authCfg.FrontendOrigins[0] + "/auth/callback"
+    redirect := redirectOrigin + "/auth/callback"
     http.Redirect(w, r, redirect, http.StatusSeeOther)
 }
 
