@@ -70,7 +70,7 @@ func main() {
 	}
 }
 
-// Simple CORS middleware -- allows configured origins
+// Simple CORS middleware -- allows configured origins with wildcard support
 func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := strings.TrimSuffix(r.Header.Get("Origin"), "/")
@@ -80,12 +80,12 @@ func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 		// Check if origin is allowed and set headers
 		originAllowed := false
 		for _, allowedOrigin := range allowedOrigins {
-			fmt.Printf("CORS: Comparing '%s' == '%s'\n", origin, allowedOrigin)
-			if allowedOrigin == "*" || allowedOrigin == "" || origin == allowedOrigin {
+			fmt.Printf("CORS: Comparing '%s' with pattern '%s'\n", origin, allowedOrigin)
+			if allowedOrigin == "*" || allowedOrigin == "" || origin == allowedOrigin || matchesWildcard(origin, allowedOrigin) {
 				originAllowed = true
 				if allowedOrigin != "*" && allowedOrigin != "" {
-					w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-					fmt.Printf("CORS: Allowed origin %s, setting header\n", allowedOrigin)
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					fmt.Printf("CORS: Allowed origin %s, setting header to %s\n", allowedOrigin, origin)
 				} else {
 					w.Header().Set("Access-Control-Allow-Origin", "*")
 					fmt.Printf("CORS: Allowing all origins (*)\n")
@@ -107,6 +107,21 @@ func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 		// Call the next handler
 		next.ServeHTTP(w, r)
 	})
+}
+
+// matchesWildcard checks if origin matches a wildcard pattern like *.vercel.app
+func matchesWildcard(origin, pattern string) bool {
+	if !strings.Contains(pattern, "*") {
+		return false
+	}
+
+	// Simple wildcard matching: only support *.domain.com pattern
+	if strings.HasPrefix(pattern, "*.") {
+		suffix := pattern[1:] // remove the *
+		return strings.HasSuffix(origin, suffix) && !strings.Contains(strings.TrimSuffix(origin, suffix), ".")
+	}
+
+	return false
 }
 
 // Logging middleware logs HTTP request details: URL, method, duration
