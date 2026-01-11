@@ -178,7 +178,7 @@ func (c *OAuthController) HandleGoogleCallback(w http.ResponseWriter, r *http.Re
     http.SetCookie(w, cookie)
 
     // Redirect to frontend callback page (will handle popup closing)
-    redirect := c.authCfg.FrontendOrigins[0] + "/auth/callback"
+    redirect := c.authCfg.FrontendOrigin + "/auth/callback"
     http.Redirect(w, r, redirect, http.StatusSeeOther)
 }
 
@@ -269,6 +269,6 @@ func (c *OAuthController) HandleLogout(w http.ResponseWriter, r *http.Request) {
 
 // Helper method to redirect to frontend callback with error
 func (c *OAuthController) redirectWithError(w http.ResponseWriter, r *http.Request, errorType string) {
-    redirect := c.authCfg.FrontendOrigins[0] + "/auth/callback?error=" + errorType
+    redirect := c.authCfg.FrontendOrigin + "/auth/callback?error=" + errorType
     http.Redirect(w, r, redirect, http.StatusSeeOther)
 }

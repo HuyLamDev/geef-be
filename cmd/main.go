@@ -60,7 +60,6 @@ func main() {
 
 	// Wrap mux with logging and CORS handlers
 	frontendOrigins := authCfg.FrontendOrigins
-	fmt.Printf("Main: Frontend origins: %v\n", frontendOrigins)
 	handler := loggingMiddleware(mux, config.Logger)
 	handler = corsMiddleware(handler, frontendOrigins)
 
@@ -103,12 +102,6 @@ func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 
 		if !originAllowed {
 			fmt.Printf("CORS: Origin %s not allowed\n", origin)
-		}
-
-		// Handle preflight OPTIONS request
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
 		}
 
 		// Call the next handler
