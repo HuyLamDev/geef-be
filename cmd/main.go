@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -115,18 +116,23 @@ func matchesWildcard(origin, pattern string) bool {
 		return false
 	}
 
+	// Parse origin to get hostname
+	originURL, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	hostname := originURL.Hostname()
+
 	// Handle https://*.domain.com pattern
 	if strings.HasPrefix(pattern, "https://*.") {
-		suffix := strings.TrimPrefix(pattern, "https://*.") // get domain.com
-		expectedPrefix := "https://"
-		expectedSuffix := "." + suffix
-		return strings.HasPrefix(origin, expectedPrefix) && strings.HasSuffix(origin, expectedSuffix) && len(strings.TrimSuffix(strings.TrimPrefix(origin, expectedPrefix), expectedSuffix)) > 0
+		domain := strings.TrimPrefix(pattern, "https://*.") // domain.com
+		return strings.HasSuffix(hostname, "."+domain) && hostname != domain
 	}
 
 	// Handle *.domain.com pattern
 	if strings.HasPrefix(pattern, "*.") {
-		suffix := pattern[1:] // remove the *
-		return strings.HasSuffix(origin, suffix) && !strings.Contains(strings.TrimSuffix(origin, suffix), ".")
+		domain := pattern[1:] // .domain.com
+		return strings.HasSuffix(hostname, domain) && hostname != strings.TrimPrefix(domain, ".")
 	}
 
 	return false
