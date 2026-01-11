@@ -12,6 +12,7 @@ type AuthConfig struct {
     GoogleClientSecret string
     GoogleRedirectURI  string
     FrontendOrigins    []string
+    FrontendRedirectPath string
     JWTSecret          string
 }
 
@@ -23,6 +24,7 @@ func NewAuthConfig() *AuthConfig {
         GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
         GoogleRedirectURI:  getEnv("GOOGLE_REDIRECT_URI", "http://localhost:8080/api/auth/google/callback"),
         FrontendOrigins:    frontendOrigins,
+        FrontendRedirectPath: getEnv("FRONTEND_REDIRECT_PATH", "/auth/callback"),
         JWTSecret:          getEnv("JWT_SECRET", os.Getenv("JWT_SECRET")),
     }
 }
