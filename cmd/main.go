@@ -109,13 +109,21 @@ func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 	})
 }
 
-// matchesWildcard checks if origin matches a wildcard pattern like *.vercel.app
+// matchesWildcard checks if origin matches a wildcard pattern like https://*.vercel.app
 func matchesWildcard(origin, pattern string) bool {
 	if !strings.Contains(pattern, "*") {
 		return false
 	}
 
-	// Simple wildcard matching: only support *.domain.com pattern
+	// Handle https://*.domain.com pattern
+	if strings.HasPrefix(pattern, "https://*.") {
+		suffix := strings.TrimPrefix(pattern, "https://*.") // get domain.com
+		expectedPrefix := "https://"
+		expectedSuffix := "." + suffix
+		return strings.HasPrefix(origin, expectedPrefix) && strings.HasSuffix(origin, expectedSuffix) && len(strings.TrimSuffix(strings.TrimPrefix(origin, expectedPrefix), expectedSuffix)) > 0
+	}
+
+	// Handle *.domain.com pattern
 	if strings.HasPrefix(pattern, "*.") {
 		suffix := pattern[1:] // remove the *
 		return strings.HasSuffix(origin, suffix) && !strings.Contains(strings.TrimSuffix(origin, suffix), ".")
