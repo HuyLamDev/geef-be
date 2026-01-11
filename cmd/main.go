@@ -14,6 +14,7 @@ import (
 	"geef-be/internal/project/presentation/controllers"
 	"geef-be/internal/user"
 	userControllers "geef-be/internal/user/presentation/controllers"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -58,6 +59,7 @@ func main() {
 
 	// Wrap mux with logging and CORS handlers
 	frontendOrigins := authCfg.FrontendOrigins
+	fmt.Printf("Main: Frontend origins: %v\n", frontendOrigins)
 	handler := loggingMiddleware(mux, config.Logger)
 	handler = corsMiddleware(handler, frontendOrigins)
 
@@ -72,18 +74,28 @@ func main() {
 func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
+		fmt.Printf("CORS: Request from origin: %s\n", origin)
+		fmt.Printf("CORS: Allowed origins: %v\n", allowedOrigins)
 
 		// Check if origin is allowed and set headers
+		originAllowed := false
 		for _, allowedOrigin := range allowedOrigins {
 			if allowedOrigin == "*" || allowedOrigin == "" || origin == allowedOrigin {
+				originAllowed = true
 				if allowedOrigin != "*" && allowedOrigin != "" {
 					w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
 					w.Header().Set("Vary", "Origin")
+					fmt.Printf("CORS: Allowed origin %s, setting header\n", allowedOrigin)
 				} else {
 					w.Header().Set("Access-Control-Allow-Origin", "*")
+					fmt.Printf("CORS: Allowing all origins (*)\n")
 				}
 				break
 			}
+		}
+
+		if !originAllowed {
+			fmt.Printf("CORS: Origin %s not allowed\n", origin)
 		}
 
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")

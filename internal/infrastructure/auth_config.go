@@ -1,6 +1,7 @@
 package infrastructure
 
 import (
+	"fmt"
 	"os"
 	"strings"
 )
@@ -35,10 +36,13 @@ func parseFrontendOrigins() []string {
         for i, origin := range origins {
             origins[i] = strings.TrimSpace(origin)
         }
+        fmt.Printf("AuthConfig: Parsed FRONTEND_ORIGINS: %v\n", origins)
         return origins
     }
 
     // Fallback to single origin for backward compatibility
     origin := getEnv("FRONTEND_ORIGIN", "http://localhost:5173")
-    return []string{origin}
+    origins := []string{origin}
+    fmt.Printf("AuthConfig: Using fallback FRONTEND_ORIGIN: %v\n", origins)
+    return origins
 }
