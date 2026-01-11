@@ -72,7 +72,7 @@ func (c *OAuthController) HandleGoogleCallback(w http.ResponseWriter, r *http.Re
     code := q.Get("code")
     if code == "" {
         c.logger.Warn("OAuth callback: missing authorization code")
-        http.Error(w, "Code missing", http.StatusBadRequest)
+        c.redirectWithError(w, r, "missing_code")
         return
     }
 
@@ -80,7 +80,7 @@ func (c *OAuthController) HandleGoogleCallback(w http.ResponseWriter, r *http.Re
     tokenResp, err := userinfra.ExchangeCode(c.authCfg, ctx, code)
     if err != nil {
         c.logger.WithError(err).Error("OAuth callback: token exchange failed")
-        http.Error(w, "Token exchange failed: "+err.Error(), http.StatusInternalServerError)
+        c.redirectWithError(w, r, "token_exchange_failed")
         return
     }
 
@@ -91,7 +91,7 @@ func (c *OAuthController) HandleGoogleCallback(w http.ResponseWriter, r *http.Re
         claims, err = userinfra.VerifyIDToken(c.authCfg, ctx, tokenResp.IdToken)
         if err != nil {
             c.logger.WithError(err).Error("OAuth callback: ID token verification failed")
-            http.Error(w, "ID token verification failed: "+err.Error(), http.StatusUnauthorized)
+            c.redirectWithError(w, r, "id_token_verification_failed")
             return
         }
     } else {
@@ -101,18 +101,18 @@ func (c *OAuthController) HandleGoogleCallback(w http.ResponseWriter, r *http.Re
         resp, err := http.DefaultClient.Do(req)
         if err != nil {
             c.logger.WithError(err).Error("OAuth callback: failed to fetch userinfo")
-            http.Error(w, "Failed to fetch userinfo: "+err.Error(), http.StatusInternalServerError)
+            c.redirectWithError(w, r, "userinfo_fetch_failed")
             return
         }
         defer resp.Body.Close()
         if resp.StatusCode != http.StatusOK {
             c.logger.WithField("status", resp.Status).Error("OAuth callback: userinfo endpoint returned non-OK status")
-            http.Error(w, "Failed to fetch userinfo: status "+resp.Status, http.StatusInternalServerError)
+            c.redirectWithError(w, r, "userinfo_status_error")
             return
         }
         if err := json.NewDecoder(resp.Body).Decode(&claims); err != nil {
             c.logger.WithError(err).Error("OAuth callback: failed to parse userinfo response")
-            http.Error(w, "Failed to parse userinfo: "+err.Error(), http.StatusInternalServerError)
+            c.redirectWithError(w, r, "userinfo_parse_error")
             return
         }
     }
@@ -134,7 +134,7 @@ func (c *OAuthController) HandleGoogleCallback(w http.ResponseWriter, r *http.Re
     existingUser, err := repo.FindUserByID(user["sub"].(string))
     if err != nil {
         c.logger.WithError(err).WithField("user_id", user["sub"]).Error("OAuth callback: failed to check existing user")
-        http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+        c.redirectWithError(w, r, "database_error")
         return
     }
     
@@ -143,7 +143,7 @@ func (c *OAuthController) HandleGoogleCallback(w http.ResponseWriter, r *http.Re
         c.logger.WithField("user_id", user["sub"]).Info("OAuth callback: first time login, saving new user")
         if err := repo.SaveUser(user); err != nil {
             c.logger.WithError(err).WithField("user_id", user["sub"]).Error("OAuth callback: failed to save new user")
-            http.Error(w, "Saving user failed: "+err.Error(), http.StatusInternalServerError)
+            c.redirectWithError(w, r, "user_save_failed")
             return
         }
     } else {
@@ -177,8 +177,8 @@ func (c *OAuthController) HandleGoogleCallback(w http.ResponseWriter, r *http.Re
     }
     http.SetCookie(w, cookie)
 
-    // Redirect to frontend origin
-    redirect := c.authCfg.FrontendOrigin + "/"
+    // Redirect to frontend callback page (will handle popup closing)
+    redirect := c.authCfg.FrontendOrigins[0] + "/auth/callback"
     http.Redirect(w, r, redirect, http.StatusSeeOther)
 }
 
@@ -265,4 +265,10 @@ func (c *OAuthController) HandleLogout(w http.ResponseWriter, r *http.Request) {
 
     w.Header().Set("Content-Type", "application/json")
     json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// Helper method to redirect to frontend callback with error
+func (c *OAuthController) redirectWithError(w http.ResponseWriter, r *http.Request, errorType string) {
+    redirect := c.authCfg.FrontendOrigins[0] + "/auth/callback?error=" + errorType
+    http.Redirect(w, r, redirect, http.StatusSeeOther)
 }

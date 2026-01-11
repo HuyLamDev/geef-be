@@ -57,9 +57,9 @@ func main() {
 	mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
 
 	// Wrap mux with logging and CORS handlers
-	frontendOrigin := authCfg.FrontendOrigin
+	frontendOrigins := authCfg.FrontendOrigins
 	handler := loggingMiddleware(mux, config.Logger)
-	handler = corsMiddleware(handler, frontendOrigin)
+	handler = corsMiddleware(handler, frontendOrigins)
 
 	// Start the server
 	config.Logger.Info("Starting Geef Backend API on port 8080")
@@ -68,16 +68,24 @@ func main() {
 	}
 }
 
-// Simple CORS middleware -- in dev it allows the configured FRONTEND_ORIGIN or '*'
-func corsMiddleware(next http.Handler, allowedOrigin string) http.Handler {
+// Simple CORS middleware -- allows configured origins
+func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if allowedOrigin == "*" || allowedOrigin == "" {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-		} else if origin == allowedOrigin {
-			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-			w.Header().Set("Vary", "Origin")
+
+		// Check if origin is allowed and set headers
+		for _, allowedOrigin := range allowedOrigins {
+			if allowedOrigin == "*" || allowedOrigin == "" || origin == allowedOrigin {
+				if allowedOrigin != "*" && allowedOrigin != "" {
+					w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+					w.Header().Set("Vary", "Origin")
+				} else {
+					w.Header().Set("Access-Control-Allow-Origin", "*")
+				}
+				break
+			}
 		}
+
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, traceparent, tracestate, baggage")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
